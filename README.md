@@ -52,3 +52,130 @@
 - **Example features:**  
 ```text
 [w_s1, w_s2, w_b1, w_b2, pos_s1, pos_s2, pos_b1, pos_b2]
+```
+
+---
+
+## 7. Vectorization
+
+- Features: word embedding + POS embedding
+
+- Concatenate embeddings for model input
+
+---
+
+## 8. Model (Feed-Forward)
+
+- Input layers for indices → embeddings → concatenation → Dense(hidden, ReLU)
+
+- Final Dense layers:
+
+  - Softmax for action prediction
+
+  - Softmax for DEPREL prediction
+
+---
+
+## 9. Training
+
+- Train on train.conllu, dev.conllu, test.conllu (cleaned)
+
+- Loss: cross-entropy on actions
+
+- Batch training
+
+- Monitor dev loss/accuracy
+
+- Save model + vocabularies
+
+---
+
+## 10. Parsing
+
+- For each test sentence:
+
+  - Start from initial state: `stack = [0], buffer = [1…N], arcs = {}`
+
+  - Extract features: state_to_feats(state)
+
+  - Predict: `probs_action, probs_deprel = model.predict(feats)`
+
+  - Validate preconditions → sort by probability → choose first valid action
+
+  - If action is LEFT/RIGHT → label = argmax(probs_deprel)
+
+  - Apply transition
+
+- **Note:** Vertical decoding
+
+---
+
+## 11. Post-Processing (postprocessor.py)
+
+- Repair invalid trees after parsing
+
+- Token without a parent → assign ROOT or nearest candidate
+
+- Multiple ROOTs → keep only one
+
+---
+
+## 12. Output Saving
+
+- Save in CoNLL-U format with HEAD/DEPREL
+
+- Keep other columns unchanged
+
+---
+
+## 13. Evaluation
+
+- Run conll18_ud_eval.py on gold test → compute LAS / UAS
+
+---
+
+## Arc-Eager Parser
+
+- Transition-based parser: stack, buffer, arcs
+
+- Actions: SHIFT, LEFT-ARC, RIGHT-ARC, REDUCE
+
+- arcs contains the final tree
+
+---
+
+## Oracle
+
+- Analyzes current state → decides next Arc-Eager transition
+
+- Receives gold tree
+
+- Simulates Arc-Eager → chooses correct (gold) action
+
+---
+
+## Gold Tree
+
+- Correct tree from CoNLL-U
+
+---
+
+## Token Format (CoNLL-U Line)
+
+- ID, FORM, LEMMA, UPOS, XPOS, FEATS, HEAD, DEPREL, DEPS, MISC
+
+- **Notes:**
+
+  - LEMMA / XPOS / FEATS / DEPS / MISC → not used
+
+  - HEAD = parent ID
+
+  - DEPREL = dependency relation
+
+---
+
+## Evaluation Metrics
+
+- UAS: Correct HEAD prediction per word
+
+- LAS: Correct HEAD + DEPREL prediction (parent + relation)
