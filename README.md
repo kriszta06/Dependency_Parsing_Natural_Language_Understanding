@@ -179,3 +179,58 @@
 - UAS: Correct HEAD prediction per word
 
 - LAS: Correct HEAD + DEPREL prediction (parent + relation)
+
+
+# Project Structure
+
+## `Main.py`
+- Read CoNLL files  
+- Convert lines into `Sentence` / `Token` objects  
+  - Example:  
+    ```python
+    trees[0] = sentence 1 -> [Token(ID=1, FORM="John", ...), Token(ID=2, FORM="eats", ...), ...]
+    ```
+- Load datasets: `train_trees`, `dev_trees`, `test_trees`  
+- Remove non-projective sentences  
+- Initialize Arc-Eager parser  
+
+---
+
+## TODO1: `algorithm.py`
+- Implement `oracle()`  
+  - Determines the gold action based on current state and gold tree
+
+---
+
+## TODO2: Dataset Generation
+- Use Oracle + Arc-Eager to generate training examples  
+- Oracle selects gold action  
+- Create `Sample(state, action, label)` objects  
+- Extract features using `state_to_feats()`  
+- Apply the action to the state (Arc-Eager)  
+
+- Output:  
+  - `training_samples`  
+  - `dev_samples`
+
+---
+
+## TODO3: `model.py`
+- Implement model using **Keras**  
+  - Embeddings for words and POS  
+  - Concatenation of embeddings  
+  - Hidden layer  
+  - Softmax layers (for action + label)  
+  - Loss function (cross-entropy for action + label)  
+- Train on `training_samples`  
+- Evaluate on `dev_samples`  
+- Apply model on test data  
+- Save output in new CoNLL file
+
+---
+
+## TODO4: `postprocessor.py`
+- Read CoNLL file produced by model  
+- Repair invalid trees  
+- Save corrected trees
+
