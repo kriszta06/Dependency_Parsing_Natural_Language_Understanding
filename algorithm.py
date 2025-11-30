@@ -115,26 +115,6 @@ class Sample(object):
 
                 Output: ['ROOT', 'Distribution', 'license', 'does', 'ROOT_UPOS', 'NOUN', 'NOUN', 'AUX']
         """
-        features = []
-        temp = []
-        for idx in range(1, nstack_feats):
-            if (len(state.S()) < nstack_feats - (idx - 1)):
-                features.append('<PAD>')
-                temp.append('<PAD>')
-            else:
-                features.append(state.S()[-idx][1])
-                temp.append(state.S()[-idx][2])
-
-        for idx in range(0, nbuffer_feats):
-            if (len(state.B()) < nbuffer_feats - idx):
-                features.append('<PAD>')
-                temp.append('<PAD>')
-            else:
-                features.append(state.B()[idx][1])
-                temp.append(state.B()[idx][2])
-
-        features.append(temp)
-        return features
     
 
     def __str__(self):
@@ -217,10 +197,10 @@ class ArcEager():
         Returns:
             bool: True if a LEFT-ARC transition is valid in the current state, False otherwise.
         """
-        if len(state.S()) == 0:
+        if len(state.S) == 0:
             return False
-        for arc in state.A():
-            if (len(state.S()) == arc[2]):
+        for arc in state.A:
+            if (len(state.S) == arc[2]):
                 return False
         
         return True
@@ -238,7 +218,7 @@ class ArcEager():
         Returns:
             bool: True if a LEFT-ARC transition is the correct action in the current state, False otherwise.
         """
-        # Intended to be a model output
+        # Follow gold arcs
         raise NotImplementedError
     
     def RA_is_correct(self, state: State) -> bool:
@@ -254,8 +234,8 @@ class ArcEager():
         Returns:
             bool: True if a RIGHT-ARC transition is the correct action in the current state, False otherwise.
         """
-        for arc in state.A():
-            if (len(state.S()) == arc[0]):
+        for arc in state.A:
+            if (len(state.S) == arc[0]):
                 return False
 
         return True
@@ -274,7 +254,7 @@ class ArcEager():
         Returns:
             bool: True if a RIGHT-ARC transition can be validly applied in the current state, False otherwise.
         """
-        # Model output
+        # Follow gold arcs
         raise NotImplementedError
 
     def REDUCE_is_correct(self, state: State) -> bool:
@@ -312,8 +292,8 @@ class ArcEager():
         Returns:
             bool: True if a REDUCE transition is valid in the current state, False otherwise.
         """
-        for arc in state.A():
-            if (len(state.S()) == arc[3]):
+        for arc in state.A:
+            if (len(state.S) == arc[3]):
                 return True
 
         return False
