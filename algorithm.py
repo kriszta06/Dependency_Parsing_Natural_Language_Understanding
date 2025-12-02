@@ -30,7 +30,7 @@ class Transition(object):
 
 
 class Sample(object):
-    """
+    """ 
     Represents a training sample for a transition-based dependency parser. 
 
     This class encapsulates a parser state and the corresponding transition action 
@@ -80,28 +80,7 @@ class Sample(object):
         return self._transition
     
 
- #   def state_to_feats(self, nbuffer_feats: int = 2, nstack_feats: int = 2):
-        
-        features = []
-        temp = []
-        for idx in range(1, nstack_feats):
-            if (len(state.S()) < nstack_feats - (idx - 1)):
-                features.append('<PAD>')
-                temp.append('<PAD>')
-            else:
-                features.append(state.S()[-idx][1])
-                temp.append(state.S()[-idx][2])
 
-        for idx in range(0, nbuffer_feats):
-            if (len(state.B()) < nbuffer_feats - idx):
-                features.append('<PAD>')
-                temp.append('<PAD>')
-            else:
-                features.append(state.B()[idx][1])
-                temp.append(state.B()[idx][2])
-
-        features.append(temp)
-        return features
 
     def state_to_feats(self, nbuffer_feats: int = 2, nstack_feats: int = 2):
         """
@@ -408,7 +387,6 @@ class ArcEager():
     
         return samples         
     
-
     def apply_transition(self, state: State, transition: Transition):
         """
         Applies a given transition to the current parsing state.
@@ -458,8 +436,6 @@ class ArcEager():
             state.S.append(b) 
             del state.B[:1]
     
-
-
     def gold_arcs(self, sent: list['Token']) -> set:
         """
         Extracts and returns the gold-standard dependency arcs from a given sentence.
@@ -485,9 +461,6 @@ class ArcEager():
             gold_arcs.add((token.head, token.dep, token.id))
 
         return gold_arcs
-
-
-   
 
 
 if __name__ == "__main__":
@@ -541,7 +514,7 @@ if __name__ == "__main__":
     left_arc_transition = Transition(ArcEager.LA, "nsubj")
     # Printing the created transition
     print(f"Created Transition: {left_arc_transition}")
-
+    
     # Creating a RIGHT-ARC transition with a specific dependency type
     right_arc_transition = Transition(ArcEager.RA, "amod")
     # Printing the created transition
