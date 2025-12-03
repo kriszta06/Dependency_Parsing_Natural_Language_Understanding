@@ -1,16 +1,20 @@
 from conllu_token import Token
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Embedding, Flatten, Dense
+from tensorflow.keras.layers import Input, Embedding, Flatten, Dense, Lambda, Concatenate
 from tensorflow.keras.models import Model
+
 import numpy as np 
 from typing import List, Tuple, Dict, Any
+
+np.random.seed(42)
+tf.random.set_seed(42)
+
 
 PAD = "<PAD>"
 UNK = "<UNK>"
 PAD_ID = 0
 UNK_ID = 1
-NONE_LABEL = "<NONE"
-
+NONE_LABEL = "<NONE>"
 
 class ParserMLP:
     """
@@ -135,8 +139,6 @@ class ParserMLP:
 
                 if len(S) >= i:
                     tok = S[-i] 
-                else:
-                    None
 
                 w = None
                 p = None
@@ -187,11 +189,16 @@ class ParserMLP:
 
             ## Save actions and labels from smaples
             tr = sample.transition
-            if tr and getattr(tr, "action", None) is not None:
-                 action_name = tr.action 
-            
-            if tr and getattr(tr, "dependency", None) is not None:
+
+            if tr is None or getattr(tr, "action", None) is None:
+                continue
+            action_name = tr.action
+
+            if getattr(tr, "dependency", None) is not None:
                 label_name = tr.dependency
+            else:
+                label_name = NONE_LABEL
+
 
             if action_name is not None:
                 actions_set.add(action_name)
@@ -253,13 +260,14 @@ class ParserMLP:
             tr = sample.transition
 
             if tr is None or getattr(tr, "action", None) is None:
-                raise ValueError("Training sample has no transition.action")
+               continue
+
             act_id = self.action2id[tr.action]
 
             if getattr(tr, "dependency", None) is not None:
                 lbl = tr.dependency 
             else:
-                NONE_LABEL
+                lbl = NONE_LABEL
 
             lbl_id = self.label2id.get(lbl, self.label2id[NONE_LABEL])
 
@@ -300,20 +308,25 @@ class ParserMLP:
             lbl = tr.dependency if getattr(tr, "dependency", None) is not None else NONE_LABEL
             if lbl not in self.label2id:
                 lbl = NONE_LABEL
+
             lbl_id = self.label2id[lbl]
 
             y_dev_action.append(act_id)
             y_dev_label.append(lbl_id)
 
-        X_dev = np.array(X_dev, dtype='int32') if X_dev else None
+        X_dev = np.array(X_dev, dtype='int32') if len(X_dev) > 0 else None
+
         if y_dev_action:
             y_dev_action = np.array(y_dev_action, dtype='int32')
-        else:
-            None
+
         if y_dev_label:
             y_dev_label = np.array(y_dev_label, dtype='int32') 
-        else:
-            None
+
+        print(f"Processed {len(flat_train)} training samples, {len(flat_dev)} dev samples")
+
+        print(f"Vocab size: {self.vocab_size}, POS size: {self.pos_size}")
+        print(f"Number of actions: {len(self.action2id)}, Number of labels: {len(self.label2id)}")
+        print(f"Number of training samples: {len(X_train)}, number of dev samples: {X_dev.shape[0] if X_dev is not None else 0}")
 
         ## Construction of Keras
         input_ids = Input(shape=(8,), dtype='int32', name='input_ids')
@@ -437,12 +450,16 @@ class ParserMLP:
 
             ## Construction of true labels
             tr = sample.transition
+
+            if tr is None or getattr(tr, "action", None) is None:
+                continue
+
             y_action_true.append(self.action2id[tr.action])
             
-            if getattr(tr, "dependency", None) is not None:
-                lbl = tr.dependency 
-            else:
-                NONE_LABEL
+            lbl = tr.dependency if getattr(tr, "dependency", None) is not None else NONE_LABEL
+
+            if lbl not in self.label2id:
+                lbl = NONE_LABEL
 
             y_label_true.append(self.label2id.get(lbl, self.label2id[NONE_LABEL]))
 
@@ -451,13 +468,17 @@ class ParserMLP:
         y_label_true = np.array(y_label_true, dtype='int32')
 
         ## Predict and evaluate
-        pred_action_probs, pred_label_probs = self.model.predict(X_eval, verbose=0)
+        pred_action_probs, pred_label_probs = self.model.predict(X_eval, batch_size=64, verbose=0)
 
         pred_action = np.argmax(pred_action_probs, axis=1)
         pred_label = np.argmax(pred_label_probs, axis=1)
 
         action_accuracy = float(np.mean(pred_action == y_action_true))
         label_accuracy = float(np.mean(pred_label == y_label_true))
+
+        print(f"Evaluated {len(X_eval)} samples")
+        print(f"Action accuracy: {action_accuracy}, Label accuracy: {label_accuracy}")
+
 
         return action_accuracy, label_accuracy
     
