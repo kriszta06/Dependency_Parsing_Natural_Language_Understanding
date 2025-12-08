@@ -30,7 +30,7 @@ class Transition(object):
 
 
 class Sample(object):
-    """
+    """ 
     Represents a training sample for a transition-based dependency parser. 
 
     This class encapsulates a parser state and the corresponding transition action 
@@ -80,6 +80,8 @@ class Sample(object):
         return self._transition
     
 
+
+
     def state_to_feats(self, nbuffer_feats: int = 2, nstack_feats: int = 2):
         """
         Extracts features from a given parsing state for use in a transition-based dependency parser.
@@ -115,27 +117,33 @@ class Sample(object):
 
                 Output: ['ROOT', 'Distribution', 'license', 'does', 'ROOT_UPOS', 'NOUN', 'NOUN', 'AUX']
         """
-        features = []
-        temp = []
-        for idx in range(1, nstack_feats):
-            if (len(state.S()) < nstack_feats - (idx - 1)):
-                features.append('<PAD>')
-                temp.append('<PAD>')
-            else:
-                features.append(state.S()[-idx][1])
-                temp.append(state.S()[-idx][2])
+        S = self.state.S          # stack (list[Token])
+        B = self.state.B          # buffer (list[Token])
 
-        for idx in range(0, nbuffer_feats):
-            if (len(state.B()) < nbuffer_feats - idx):
-                features.append('<PAD>')
-                temp.append('<PAD>')
-            else:
-                features.append(state.B()[idx][1])
-                temp.append(state.B()[idx][2])
+        word_feats = []
+        upos_feats = []
 
-        features.append(temp)
-        return features
-    
+        # STACK features (top-to-bottom)
+        for idx in range(1, nstack_feats + 1):
+            if len(S) - idx >= 0:
+                tok = S[-idx]                # top = last element
+                word_feats.append(tok.form)
+                upos_feats.append(tok.upos)
+            else:
+                word_feats.append("<PAD>")
+                upos_feats.append("<PAD>")
+
+        # BUFFER features (head forward)
+        for idx in range(nbuffer_feats):
+            if idx < len(B):
+                tok = B[idx]                 # buffer head = first element
+                word_feats.append(tok.form)
+                upos_feats.append(tok.upos)
+            else:
+                word_feats.append("<PAD>")
+                upos_feats.append("<PAD>")
+
+        return word_feats + upos_feats
 
     def __str__(self):
         """
@@ -225,7 +233,7 @@ class ArcEager():
         
         return True
 
-    def LA_is_correct(self, state: State) -> bool:
+    def LA_is_correct(self, state: State, tokens: list['Token']) -> bool:
         """
         Determines if a LEFT-ARC (LA) transition is the correct action for the current parsing state.
 
@@ -238,10 +246,15 @@ class ArcEager():
         Returns:
             bool: True if a LEFT-ARC transition is the correct action in the current state, False otherwise.
         """
-        # Intended to be a model output
-        raise NotImplementedError
+        gArcs = self.gold_arcs(tokens)
+        tempArc = (state.B[0], 'x', state.S[-1])
+        for token in gArcs:
+            if tempArc[0] == token[0][0] and tempArc[2] == token[2][0]:
+                return True
+
+        return False
     
-    def RA_is_correct(self, state: State) -> bool:
+    def RA_is_correct(self, state: State, tokens: list['Token']) -> bool:
         """
         Determines if a RIGHT-ARC (RA) transition is the correct action for the current parsing state.
 
@@ -254,11 +267,13 @@ class ArcEager():
         Returns:
             bool: True if a RIGHT-ARC transition is the correct action in the current state, False otherwise.
         """
-        for arc in state.A():
-            if (len(state.S()) == arc[0]):
-                return False
+        gArcs = self.gold_arcs(tokens)
+        tempArc = (state.S[-1], 'x', state.B[0])
+        for token in gArcs:
+            if tempArc[0] == token[0][0] and tempArc[2] == token[2][0]:
+                return True
 
-        return True
+        return False
 
     def RA_is_valid(self, state: State) -> bool:
         """
@@ -274,10 +289,13 @@ class ArcEager():
         Returns:
             bool: True if a RIGHT-ARC transition can be validly applied in the current state, False otherwise.
         """
-        # Model output
-        raise NotImplementedError
+        for arc in state.A:
+            if (len(state.S == arc[0])):
+                return False
 
-    def REDUCE_is_correct(self, state: State) -> bool:
+        return True
+
+    def RA_is_correct(self, state: State, tokens: list['Token']) -> bool:
         """
         Determines if applying a REDUCE transition is the correct action for the current parsing state.
 
@@ -294,9 +312,13 @@ class ArcEager():
         Returns:
             bool: True if a REDUCE transition is the correct action in the current state, False otherwise.
         """
-        #It is correct to do if there is no word in the state buffer  (state.B) which head is 
-        #the word on the top of the stack (state.S[-1])
-        raise NotImplementedError
+        gArcs = self.gold_arcs(tokens)
+        tempArc = (state.S[-1], 'x', state.B[0])
+        for token in gArcs:
+            if tempArc[0] == token[0][0] and tempArc[2] == token[2][0]:
+                return True
+
+        return False
 
     def REDUCE_is_valid(self, state: State) -> bool:
         """
@@ -379,7 +401,6 @@ class ArcEager():
     
         return samples         
     
-
     def apply_transition(self, state: State, transition: Transition):
         """
         Applies a given transition to the current parsing state.
@@ -429,8 +450,6 @@ class ArcEager():
             state.S.append(b) 
             del state.B[:1]
     
-
-
     def gold_arcs(self, sent: list['Token']) -> set:
         """
         Extracts and returns the gold-standard dependency arcs from a given sentence.
@@ -458,10 +477,8 @@ class ArcEager():
         return gold_arcs
 
 
-   
-
-
 if __name__ == "__main__":
+
 
 
     print("**************************************************")
@@ -511,7 +528,7 @@ if __name__ == "__main__":
     left_arc_transition = Transition(ArcEager.LA, "nsubj")
     # Printing the created transition
     print(f"Created Transition: {left_arc_transition}")
-
+    
     # Creating a RIGHT-ARC transition with a specific dependency type
     right_arc_transition = Transition(ArcEager.RA, "amod")
     # Printing the created transition
@@ -538,3 +555,18 @@ if __name__ == "__main__":
 
     # To display the created Sample instance
     print("Sample:\n", sample_instance)
+
+    stack_tokens = [
+    Token(0, "ROOT", "ROOT_UPOS")
+]
+
+    buffer_tokens = [
+        Token(1, "Distribuția", "NOUN"),
+        Token(2, "de", "ADP"),
+        Token(3, "date", "NOUN")
+    ]
+
+    state = DummyState(stack_tokens, buffer_tokens)
+    parser = DummyParser(state)
+
+    print(parser.state_to_feats())
