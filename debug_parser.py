@@ -1,16 +1,18 @@
-from model import ParserMLP
+from model import ParserMLP, State
 import numpy as np
 
-# ---------- Fake structures ----------
+# ---------- Fake structures for testing ----------
 class FakeToken:
-    def __init__(self, form, upos):
+    def __init__(self, form, upos, id):
         self.form = form
         self.upos = upos
+        self.id = id  # needed by apply_transition
 
 class FakeState:
-    def __init__(self, S, B):
+    def __init__(self, S, B, A=None):
         self.S = S
         self.B = B
+        self.A = A or set()
 
 class FakeTransition:
     def __init__(self, action, dependency):
@@ -22,10 +24,10 @@ class FakeSample:
         self.state = state
         self.transition = transition
 
-# ---------- Build fake data with English words ----------
-t1 = FakeToken("John", "PROPN")
-t2 = FakeToken("loves", "VERB")
-t3 = FakeToken("Mary", "PROPN")
+# ---------- Build fake data ----------
+t1 = FakeToken("John", "PROPN", 1)
+t2 = FakeToken("loves", "VERB", 2)
+t3 = FakeToken("Mary", "PROPN", 3)
 
 # Sample 1: initial state
 state1 = FakeState(S=[t1], B=[t2, t3])
@@ -55,8 +57,8 @@ accA, accL = model.evaluate(train_data)
 print("\nAccuracy action:", accA)
 print("Accuracy label:", accL)
 
-# ---------- Check X_train input features ----------
-print("\n--- Debug: Input features for training ---")
+# ---------- Check input features ----------
+print("\n--- Debug: Input features ---")
 def print_features(sample):
     state = sample.state
     S = state.S
@@ -87,18 +89,29 @@ for p in ["PROPN", "VERB"]:
     pid = model.pos2id[p]
     print(f"Embedding for POS '{p}': {pos_emb_weights[pid]}")
 
+# ---------- Prepare sentences for run() ----------
+sentences = [[t1, t2, t3]]
+
+# ---------- Run parser ----------
+final_states = model.run(sentences)
+
+print("\n--- Final states after run() ---")
+for i, state in enumerate(final_states):
+    print(f"Sentence {i+1}:")
+    print("Stack:", [tok.form for tok in state.S])
+    print("Buffer:", [tok.form for tok in state.B])
+    print("Arcs:", state.A)
+
 # ---------- Manual prediction ----------
 print("\n--- Manual prediction ---")
-feat = np.array([[
-    model.word2id.get("John", 1),
-    model.word2id.get("loves", 1),
-    model.word2id.get("Mary", 1),
-    0,  # PAD
-    model.pos2id.get("PROPN", 1),
-    model.pos2id.get("VERB", 1),
-    model.pos2id.get("PROPN", 1),
-    0  # PAD
-]], dtype='int32')
+feat = np.array([[model.word2id.get("John", 1),
+                  model.word2id.get("loves", 1),
+                  model.word2id.get("Mary", 1),
+                  0,  # PAD
+                  model.pos2id.get("PROPN", 1),
+                  model.pos2id.get("VERB", 1),
+                  model.pos2id.get("PROPN", 1),
+                  0]], dtype='int32')
 
 predA, predL = model.model.predict(feat)
 predA_id = np.argmax(predA, axis=1)

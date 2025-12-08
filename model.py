@@ -2,7 +2,7 @@ from conllu_token import Token
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Embedding, Flatten, Dense, Lambda, Concatenate
 from tensorflow.keras.models import Model
-
+from state import State
 import numpy as np 
 from typing import List, Tuple, Dict, Any
 
@@ -482,6 +482,77 @@ class ParserMLP:
 
         return action_accuracy, label_accuracy
     
+
+    # Helper method to extract features from a state
+    def extract_features(self, state):
+        
+        S = getattr(state, "S")
+        B = getattr(state, "B")
+
+        def get_word_id(tok):
+            if tok is None:
+                return PAD_ID
+            w = getattr(tok, "form", None) or getattr(tok, "FORM", None) or getattr(tok, "word", None)
+            if w is None:
+                return PAD_ID
+            return self.word2id.get(w, UNK_ID)
+        
+        def get_pos_id(tok):
+            if tok is None:
+                return PAD_ID
+            p = getattr(tok, "upos", None) or getattr(tok, "UPOS", None) or getattr(tok, "pos", None)
+            if p is None:
+                return PAD_ID
+            return self.pos2id.get(p, UNK_ID)
+        
+        s1 = get_word_id(S[-1]) if len(S) >= 1 else PAD_ID
+        s2 = get_word_id(S[-2]) if len(S) >= 2 else PAD_ID
+        b1 = get_word_id(B[0]) if len(B) >= 1 else PAD_ID
+        b2 = get_word_id(B[1]) if len(B) >= 2 else PAD_ID
+        ps1 = get_pos_id(S[-1]) if len(S) >= 1 else PAD_ID
+        ps2 = get_pos_id(S[-2]) if len(S) >= 2 else PAD_ID
+        pb1 = get_pos_id(B[0]) if len(B) >= 1 else PAD_ID
+        pb2 = get_pos_id(B[1]) if len(B) >= 2 else PAD_ID
+
+        return [s1, s2, b1, b2, ps1, ps2, pb1, pb2]
+    
+
+
+    def is_valid_transition(self, state, action):
+
+        if action == "SHIFT" and len(state.B) > 0:
+            return True
+        if action in ("LEFT-ARC", "RIGHT-ARC") and len(state.S) >= 2:
+            return True
+        
+        return False
+    
+    def apply_transition(self, state, action, dep_label):
+        S = state.S.copy()
+        B = state.B.copy()
+        A = state.A.copy()  
+
+        if action == "SHIFT" and len(B) > 0:
+            S.append(B.pop(0))
+        elif action == "LEFT-ARC" and len(S) >= 2:
+            head = S[-1]
+            dep = S[-2]
+            A.add((head.id, dep_label, dep.id))
+            S.pop(-2)
+        elif action == "RIGHT-ARC" and len(S) >= 2:
+            head = S[-2]
+            dep = S[-1]
+            A.add((head.id, dep_label, dep.id))
+            S.pop(-1)
+
+        return State(s=S, b=B, a=A)
+    
+    def transition_from_index(self, idx):
+        return self.id2action[idx]
+    
+    def is_final(self, state):
+        return len(state.B) == 0 and len(state.S) == 1
+    
     def run(self, sents: list['Token']):
         """
         Executes the model on a list of sentences to perform dependency parsing.
@@ -496,17 +567,63 @@ class ParserMLP:
 
         # Main Steps for Processing Sentences:
         # 1. Initialize: Create the initial state for each sentence.
-        # 2. Feature Representation: Convert states to their corresponding list of features.
-        # 3. Model Prediction: Use the model to predict the next transition and dependency type for all current states.
-        # 4. Transition Sorting: For each prediction, sort the transitions by likelihood using numpy.argsort, 
-        #    and select the most likely dependency type with argmax.
-        # 5. Validation Check: Verify if the selected transition is valid for each prediction. If not, select the next most likely one.
-        # 6. State Update: Apply the selected actions to update all states, and create a list of new states.
-        # 7. Final State Check: Remove sentences that have reached a final state.
-        # 8. Iterative Process: Repeat steps 2 to 7 until all sentences have reached their final state.
+        states = [State(s=[sent[0]], b=sent[1:], a=set()) for sent in sents]
+        
+        final_states = []
+
+        while states:
+
+            # 2. Feature Representation: Convert states to their corresponding list of features.
+            features = np.array([self.extract_features(state) for state in states], dtype='int32')
 
 
-## TODO: Debugging - Kriszta
+            # 3. Model Prediction: Use the model to predict the next transition and dependency type for all current states.
+            transitions_scores, dep_scores = self.model.predict(features, verbose=0)
+
+            new_states = []
+
+            # 4. Transition Sorting: For each prediction, sort the transitions by likelihood using numpy.argsort, 
+            #    and select the most likely dependency type with argmax.
+            # 5. Validation Check: Verify if the selected transition is valid for each prediction. If not, select the next most likely one.
+            for i, state in enumerate(states):
+
+                sorted_transitions = transitions_scores[i].argsort()[::-1]
+                selected_transition = None
+                selected_dep = None
+
+                for t_idx in sorted_transitions:
+                    t = self.transition_from_index(t_idx)
+                    dep_label_idx = np.argmax(dep_scores[i])
+                    dep_label = self.id2label[dep_label_idx]
+
+                    if self.is_valid_transition(state, t):
+                        selected_transition = t
+                        selected_dep = dep_label
+                        break
+
+                if selected_transition is None:
+                    continue
+                
+                 # 6. State Update: Apply the selected actions to update all states, and create a list of new states.
+                state = self.apply_transition(state, selected_transition, selected_dep)
+
+                 # 7. Final State Check: Remove sentences that have reached a final state.
+                if self.is_final(state):
+                    final_states.append(state)
+                else:
+                    new_states.append(state)
+
+             # 8. Iterative Process: Repeat steps 2 to 7 until all sentences have reached their final state.
+            states = new_states
+
+        return final_states
+
+        
+        
+       
+       
+
+
      
 if __name__ == "__main__":
     
