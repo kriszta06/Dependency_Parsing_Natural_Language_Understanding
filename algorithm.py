@@ -233,7 +233,7 @@ class ArcEager():
         
         return True
 
-    def LA_is_correct(self, state: State) -> bool:
+    def LA_is_correct(self, state: State, tokens: list['Token']) -> bool:
         """
         Determines if a LEFT-ARC (LA) transition is the correct action for the current parsing state.
 
@@ -246,10 +246,15 @@ class ArcEager():
         Returns:
             bool: True if a LEFT-ARC transition is the correct action in the current state, False otherwise.
         """
-        # Intended to be a model output
-        raise NotImplementedError
+        gArcs = self.gold_arcs(tokens)
+        tempArc = (state.B[0], 'x', state.S[-1])
+        for token in gArcs:
+            if tempArc[0] == token[0][0] and tempArc[2] == token[2][0]:
+                return True
+
+        return False
     
-    def RA_is_correct(self, state: State) -> bool:
+    def RA_is_correct(self, state: State, tokens: list['Token']) -> bool:
         """
         Determines if a RIGHT-ARC (RA) transition is the correct action for the current parsing state.
 
@@ -262,11 +267,13 @@ class ArcEager():
         Returns:
             bool: True if a RIGHT-ARC transition is the correct action in the current state, False otherwise.
         """
-        for arc in state.A():
-            if (len(state.S()) == arc[0]):
-                return False
+        gArcs = self.gold_arcs(tokens)
+        tempArc = (state.S[-1], 'x', state.B[0])
+        for token in gArcs:
+            if tempArc[0] == token[0][0] and tempArc[2] == token[2][0]:
+                return True
 
-        return True
+        return False
 
     def RA_is_valid(self, state: State) -> bool:
         """
@@ -282,10 +289,13 @@ class ArcEager():
         Returns:
             bool: True if a RIGHT-ARC transition can be validly applied in the current state, False otherwise.
         """
-        # Model output
-        raise NotImplementedError
+        for arc in state.A:
+            if (len(state.S == arc[0])):
+                return False
 
-    def REDUCE_is_correct(self, state: State) -> bool:
+        return True
+
+    def RA_is_correct(self, state: State, tokens: list['Token']) -> bool:
         """
         Determines if applying a REDUCE transition is the correct action for the current parsing state.
 
@@ -302,9 +312,13 @@ class ArcEager():
         Returns:
             bool: True if a REDUCE transition is the correct action in the current state, False otherwise.
         """
-        #It is correct to do if there is no word in the state buffer  (state.B) which head is 
-        #the word on the top of the stack (state.S[-1])
-        raise NotImplementedError
+        gArcs = self.gold_arcs(tokens)
+        tempArc = (state.S[-1], 'x', state.B[0])
+        for token in gArcs:
+            if tempArc[0] == token[0][0] and tempArc[2] == token[2][0]:
+                return True
+
+        return False
 
     def REDUCE_is_valid(self, state: State) -> bool:
         """
