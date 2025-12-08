@@ -225,15 +225,15 @@ class ArcEager():
         Returns:
             bool: True if a LEFT-ARC transition is valid in the current state, False otherwise.
         """
-        if len(state.S()) == 0:
+        if len(state.S) == 0:
             return False
-        for arc in state.A():
-            if (len(state.S()) == arc[2]):
+        for arc in state.A:
+            if (len(state.S) == arc[2]):
                 return False
-        
+
         return True
 
-    def LA_is_correct(self, state: State) -> bool:
+    def LA_is_correct(self, state: State, tokens: list['Token']) -> bool:
         """
         Determines if a LEFT-ARC (LA) transition is the correct action for the current parsing state.
 
@@ -246,10 +246,17 @@ class ArcEager():
         Returns:
             bool: True if a LEFT-ARC transition is the correct action in the current state, False otherwise.
         """
-        # Intended to be a model output
-        raise NotImplementedError
+        gArcs = self.gold_arcs(tokens)
+        tempArc = (state.B[0], 'x', state.S[-1])
+        for arc in gArcs:
+            # print(tempArc[0].id, " == ", arc[0], " and ", tempArc[2].id, " == ", arc[2])
+            if tempArc[0].id == arc[0] and tempArc[2].id == arc[2]:
+                print("Arc found: ", tempArc[0].id, " and ", tempArc[2].id)
+                return True
+
+        return False
     
-    def RA_is_correct(self, state: State) -> bool:
+    def RA_is_correct(self, state: State, tokens: list['Token']) -> bool:
         """
         Determines if a RIGHT-ARC (RA) transition is the correct action for the current parsing state.
 
@@ -262,11 +269,14 @@ class ArcEager():
         Returns:
             bool: True if a RIGHT-ARC transition is the correct action in the current state, False otherwise.
         """
-        for arc in state.A():
-            if (len(state.S()) == arc[0]):
-                return False
+        gArcs = self.gold_arcs(tokens)
+        tempArc = (state.S[-1], 'x', state.B[0])
+        for arc in gArcs:
+            if tempArc[0].id == arc[0] and tempArc[2].id == arc[0]:
+                print("Arc found", tempArc[2].id, " and ", tempArc[0].id)
+                return True
 
-        return True
+        return False
 
     def RA_is_valid(self, state: State) -> bool:
         """
@@ -282,10 +292,13 @@ class ArcEager():
         Returns:
             bool: True if a RIGHT-ARC transition can be validly applied in the current state, False otherwise.
         """
-        # Model output
-        raise NotImplementedError
+        for arc in state.A:
+            if (len(state.S) == arc[0]):
+                return False
 
-    def REDUCE_is_correct(self, state: State) -> bool:
+        return True
+
+    def REDUCE_is_correct(self, state: State, tokens: list['Token']) -> bool:
         """
         Determines if applying a REDUCE transition is the correct action for the current parsing state.
 
@@ -302,9 +315,14 @@ class ArcEager():
         Returns:
             bool: True if a REDUCE transition is the correct action in the current state, False otherwise.
         """
-        #It is correct to do if there is no word in the state buffer  (state.B) which head is 
-        #the word on the top of the stack (state.S[-1])
-        raise NotImplementedError
+        gArcs = self.gold_arcs(tokens)
+        tempArc = ('x', 'x', state.S[-1])
+        for arc in gArcs:
+            if tempArc[2].id == arc[2]:
+                return False
+
+        print("Reduce found")
+        return True
 
     def REDUCE_is_valid(self, state: State) -> bool:
         """
@@ -320,8 +338,8 @@ class ArcEager():
         Returns:
             bool: True if a REDUCE transition is valid in the current state, False otherwise.
         """
-        for arc in state.A():
-            if (len(state.S()) == arc[3]):
+        for arc in state.A:
+            if (len(state.S) == arc[2]):
                 return True
 
         return False
@@ -352,21 +370,22 @@ class ArcEager():
         #Applies the transition system until a final configuration state is reached
         while not self.final_state(state):
             
-            if self.LA_is_valid(state) and self.LA_is_correct(state):
-                transition = Transition(self.LA)
+            if self.LA_is_valid(state) and self.LA_is_correct(state, sent):
+                tempArc = 
+                transition = Transition(self.LA, )
                 #Add current state 'state' (the input) and the transition taken (the desired output) to the list of samples
                 samples.append(Sample(state, transition))
                 #Update the state by applying the LA transition using the function apply_transition
                 self.apply_transition(state, transition)
 
-            elif self.RA_is_valid(state) and self.RA_is_correct(state):
+            elif self.RA_is_valid(state) and self.RA_is_correct(state, sent):
                 transition = Transition(self.RA)
                 #Add current state 'state' (the input) and the transition taken (the desired output) to the list of samples
                 samples.append(Sample(state, transition))
                 #Update the state by applying the RA transition using the function apply_transition
                 self.apply_transition(state, transition)
 
-            elif self.REDUCE_is_valid(state) and self.REDUCE_is_correct(state):
+            elif self.REDUCE_is_valid(state) and self.REDUCE_is_correct(state, sent):
                 transition = Transition(self.REDUCE)
                 #Add current state 'state' (the input) and the transition taken (the desired output) to the list of samples
                 samples.append(Sample(state, transition))
@@ -416,19 +435,21 @@ class ArcEager():
             # LEFT-ARC transition logic: to be implemented
             # Add an arc to the state from the top of the buffer to the top of the stack
             # Remove from the state the top word from the stack
-            raise NotImplementedError
+            state.A.add((b.id, dep, s.id))
+            state.S.pop(-1)
 
         elif t == self.RA and self.RA_is_valid(state): 
             # RIGHT-ARC transition
             # Add an arc to the state from the stack top to the buffer head with the specified dependency
             # Move from the state the buffer head to the stack
             # Remove from the state the first item from the buffer
-            raise NotImplementedError
+            state.A.add((s.id, dep, b.id))
+            state.B.pop(0)
 
         elif t == self.REDUCE and self.has_head(s, state.A): 
             # REDUCE transition logic: to be implemented
             # Remove from state the word from the top of the stack
-            raise NotImplementedError
+            state.S.pop(-1)
 
         else:
             # SHIFT transition logic: Already implemented! Use it as a basis to implement the others
@@ -436,6 +457,12 @@ class ArcEager():
             state.S.append(b) 
             del state.B[:1]
     
+    def get_dependency(self, tempArc, sent: list['Token']) -> str:
+        gArcs = gold_arcs(sent)
+        for arc in gArcs:
+            if tempArc[0].id == arc[0] and tempArc[2].id == arc[2]:
+                return arc[1]
+        
     def gold_arcs(self, sent: list['Token']) -> set:
         """
         Extracts and returns the gold-standard dependency arcs from a given sentence.
