@@ -1,16 +1,20 @@
 from conllu_token import Token
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Embedding, Flatten, Dense
+from tensorflow.keras.layers import Input, Embedding, Flatten, Dense, Lambda, Concatenate
 from tensorflow.keras.models import Model
+from state import State
 import numpy as np 
 from typing import List, Tuple, Dict, Any
+
+np.random.seed(42)
+tf.random.set_seed(42)
+
 
 PAD = "<PAD>"
 UNK = "<UNK>"
 PAD_ID = 0
 UNK_ID = 1
-NONE_LABEL = "<NONE"
-
+NONE_LABEL = "<NONE>"
 
 class ParserMLP:
     """
@@ -135,8 +139,6 @@ class ParserMLP:
 
                 if len(S) >= i:
                     tok = S[-i] 
-                else:
-                    None
 
                 w = None
                 p = None
@@ -187,11 +189,16 @@ class ParserMLP:
 
             ## Save actions and labels from smaples
             tr = sample.transition
-            if tr and getattr(tr, "action", None) is not None:
-                 action_name = tr.action 
-            
-            if tr and getattr(tr, "dependency", None) is not None:
+
+            if tr is None or getattr(tr, "action", None) is None:
+                continue
+            action_name = tr.action
+
+            if getattr(tr, "dependency", None) is not None:
                 label_name = tr.dependency
+            else:
+                label_name = NONE_LABEL
+
 
             if action_name is not None:
                 actions_set.add(action_name)
@@ -253,13 +260,14 @@ class ParserMLP:
             tr = sample.transition
 
             if tr is None or getattr(tr, "action", None) is None:
-                raise ValueError("Training sample has no transition.action")
+               continue
+
             act_id = self.action2id[tr.action]
 
             if getattr(tr, "dependency", None) is not None:
                 lbl = tr.dependency 
             else:
-                NONE_LABEL
+                lbl = NONE_LABEL
 
             lbl_id = self.label2id.get(lbl, self.label2id[NONE_LABEL])
 
@@ -300,20 +308,25 @@ class ParserMLP:
             lbl = tr.dependency if getattr(tr, "dependency", None) is not None else NONE_LABEL
             if lbl not in self.label2id:
                 lbl = NONE_LABEL
+
             lbl_id = self.label2id[lbl]
 
             y_dev_action.append(act_id)
             y_dev_label.append(lbl_id)
 
-        X_dev = np.array(X_dev, dtype='int32') if X_dev else None
+        X_dev = np.array(X_dev, dtype='int32') if len(X_dev) > 0 else None
+
         if y_dev_action:
             y_dev_action = np.array(y_dev_action, dtype='int32')
-        else:
-            None
+
         if y_dev_label:
             y_dev_label = np.array(y_dev_label, dtype='int32') 
-        else:
-            None
+
+        print(f"Processed {len(flat_train)} training samples, {len(flat_dev)} dev samples")
+
+        print(f"Vocab size: {self.vocab_size}, POS size: {self.pos_size}")
+        print(f"Number of actions: {len(self.action2id)}, Number of labels: {len(self.label2id)}")
+        print(f"Number of training samples: {len(X_train)}, number of dev samples: {X_dev.shape[0] if X_dev is not None else 0}")
 
         ## Construction of Keras
         input_ids = Input(shape=(8,), dtype='int32', name='input_ids')
@@ -437,12 +450,16 @@ class ParserMLP:
 
             ## Construction of true labels
             tr = sample.transition
+
+            if tr is None or getattr(tr, "action", None) is None:
+                continue
+
             y_action_true.append(self.action2id[tr.action])
             
-            if getattr(tr, "dependency", None) is not None:
-                lbl = tr.dependency 
-            else:
-                NONE_LABEL
+            lbl = tr.dependency if getattr(tr, "dependency", None) is not None else NONE_LABEL
+
+            if lbl not in self.label2id:
+                lbl = NONE_LABEL
 
             y_label_true.append(self.label2id.get(lbl, self.label2id[NONE_LABEL]))
 
@@ -451,7 +468,7 @@ class ParserMLP:
         y_label_true = np.array(y_label_true, dtype='int32')
 
         ## Predict and evaluate
-        pred_action_probs, pred_label_probs = self.model.predict(X_eval, verbose=0)
+        pred_action_probs, pred_label_probs = self.model.predict(X_eval, batch_size=64, verbose=0)
 
         pred_action = np.argmax(pred_action_probs, axis=1)
         pred_label = np.argmax(pred_label_probs, axis=1)
@@ -459,7 +476,82 @@ class ParserMLP:
         action_accuracy = float(np.mean(pred_action == y_action_true))
         label_accuracy = float(np.mean(pred_label == y_label_true))
 
+        print(f"Evaluated {len(X_eval)} samples")
+        print(f"Action accuracy: {action_accuracy}, Label accuracy: {label_accuracy}")
+
+
         return action_accuracy, label_accuracy
+    
+
+    # Helper method to extract features from a state
+    def extract_features(self, state):
+        
+        S = getattr(state, "S")
+        B = getattr(state, "B")
+
+        def get_word_id(tok):
+            if tok is None:
+                return PAD_ID
+            w = getattr(tok, "form", None) or getattr(tok, "FORM", None) or getattr(tok, "word", None)
+            if w is None:
+                return PAD_ID
+            return self.word2id.get(w, UNK_ID)
+        
+        def get_pos_id(tok):
+            if tok is None:
+                return PAD_ID
+            p = getattr(tok, "upos", None) or getattr(tok, "UPOS", None) or getattr(tok, "pos", None)
+            if p is None:
+                return PAD_ID
+            return self.pos2id.get(p, UNK_ID)
+        
+        s1 = get_word_id(S[-1]) if len(S) >= 1 else PAD_ID
+        s2 = get_word_id(S[-2]) if len(S) >= 2 else PAD_ID
+        b1 = get_word_id(B[0]) if len(B) >= 1 else PAD_ID
+        b2 = get_word_id(B[1]) if len(B) >= 2 else PAD_ID
+        ps1 = get_pos_id(S[-1]) if len(S) >= 1 else PAD_ID
+        ps2 = get_pos_id(S[-2]) if len(S) >= 2 else PAD_ID
+        pb1 = get_pos_id(B[0]) if len(B) >= 1 else PAD_ID
+        pb2 = get_pos_id(B[1]) if len(B) >= 2 else PAD_ID
+
+        return [s1, s2, b1, b2, ps1, ps2, pb1, pb2]
+    
+
+
+    def is_valid_transition(self, state, action):
+
+        if action == "SHIFT" and len(state.B) > 0:
+            return True
+        if action in ("LEFT-ARC", "RIGHT-ARC") and len(state.S) >= 2:
+            return True
+        
+        return False
+    
+    def apply_transition(self, state, action, dep_label):
+        S = state.S.copy()
+        B = state.B.copy()
+        A = state.A.copy()  
+
+        if action == "SHIFT" and len(B) > 0:
+            S.append(B.pop(0))
+        elif action == "LEFT-ARC" and len(S) >= 2:
+            head = S[-1]
+            dep = S[-2]
+            A.add((head.id, dep_label, dep.id))
+            S.pop(-2)
+        elif action == "RIGHT-ARC" and len(S) >= 2:
+            head = S[-2]
+            dep = S[-1]
+            A.add((head.id, dep_label, dep.id))
+            S.pop(-1)
+
+        return State(s=S, b=B, a=A)
+    
+    def transition_from_index(self, idx):
+        return self.id2action[idx]
+    
+    def is_final(self, state):
+        return len(state.B) == 0 and len(state.S) == 1
     
     def run(self, sents: list['Token']):
         """
@@ -475,17 +567,63 @@ class ParserMLP:
 
         # Main Steps for Processing Sentences:
         # 1. Initialize: Create the initial state for each sentence.
-        # 2. Feature Representation: Convert states to their corresponding list of features.
-        # 3. Model Prediction: Use the model to predict the next transition and dependency type for all current states.
-        # 4. Transition Sorting: For each prediction, sort the transitions by likelihood using numpy.argsort, 
-        #    and select the most likely dependency type with argmax.
-        # 5. Validation Check: Verify if the selected transition is valid for each prediction. If not, select the next most likely one.
-        # 6. State Update: Apply the selected actions to update all states, and create a list of new states.
-        # 7. Final State Check: Remove sentences that have reached a final state.
-        # 8. Iterative Process: Repeat steps 2 to 7 until all sentences have reached their final state.
+        states = [State(s=[sent[0]], b=sent[1:], a=set()) for sent in sents]
+        
+        final_states = []
+
+        while states:
+
+            # 2. Feature Representation: Convert states to their corresponding list of features.
+            features = np.array([self.extract_features(state) for state in states], dtype='int32')
 
 
-## TODO: Debugging - Kriszta
+            # 3. Model Prediction: Use the model to predict the next transition and dependency type for all current states.
+            transitions_scores, dep_scores = self.model.predict(features, verbose=0)
+
+            new_states = []
+
+            # 4. Transition Sorting: For each prediction, sort the transitions by likelihood using numpy.argsort, 
+            #    and select the most likely dependency type with argmax.
+            # 5. Validation Check: Verify if the selected transition is valid for each prediction. If not, select the next most likely one.
+            for i, state in enumerate(states):
+
+                sorted_transitions = transitions_scores[i].argsort()[::-1]
+                selected_transition = None
+                selected_dep = None
+
+                for t_idx in sorted_transitions:
+                    t = self.transition_from_index(t_idx)
+                    dep_label_idx = np.argmax(dep_scores[i])
+                    dep_label = self.id2label[dep_label_idx]
+
+                    if self.is_valid_transition(state, t):
+                        selected_transition = t
+                        selected_dep = dep_label
+                        break
+
+                if selected_transition is None:
+                    continue
+                
+                 # 6. State Update: Apply the selected actions to update all states, and create a list of new states.
+                state = self.apply_transition(state, selected_transition, selected_dep)
+
+                 # 7. Final State Check: Remove sentences that have reached a final state.
+                if self.is_final(state):
+                    final_states.append(state)
+                else:
+                    new_states.append(state)
+
+             # 8. Iterative Process: Repeat steps 2 to 7 until all sentences have reached their final state.
+            states = new_states
+
+        return final_states
+
+        
+        
+       
+       
+
+
      
 if __name__ == "__main__":
     
