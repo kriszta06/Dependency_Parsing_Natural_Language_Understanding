@@ -1,6 +1,6 @@
-
 from conllu_reader import ConlluReader
 from algorithm import ArcEager
+from model import ParserMLP
 
 def read_file(reader, path, inference):
     trees = reader.read_conllu_file(path, inference)
@@ -46,8 +46,14 @@ print ("\n ------ TODO: Implement the rest of the assignment ------")
 # 3. Utilize the same 'oracle' function to generate development samples for model tuning and evaluation.
 
 train_samples = []
+dev_samples = []
 for sentence in train_trees:
     train_samples.append(arc_eager.oracle(sentence))
+for sentence in dev_trees:
+    dev_samples.append(arc_eager.oracle(sentence))
+
+model = ParserMLP()
+model.train(train_samples, dev_samples)
 
 # TODO: Implement the 'state_to_feats' function in the Sample class.
 # This function should convert the current parser state into a list of features for use by the neural model classifier.

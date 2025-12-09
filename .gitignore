@@ -12,3 +12,5 @@ __pycache__/conllu_reader.cpython-313.pyc
 __pycache__/model.cpython-313.pyc
 .ipynb_checkpoints/main-checkpoint.py
 .ipynb_checkpoints/main-checkpoint.py
+__pycache__/conllu_token.cpython-313.pyc
+.ipynb_checkpoints/main-checkpoint.py
