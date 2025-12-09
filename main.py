@@ -1,6 +1,6 @@
 
 from conllu_reader import ConlluReader
-from algorithm import ArcEager, build_samples
+from algorithm import ArcEager
 
 def read_file(reader, path, inference):
     trees = reader.read_conllu_file(path, inference)
@@ -12,14 +12,14 @@ def read_file(reader, path, inference):
     return trees
 
 
-"""f 
+"""
 Read and convert CoNLLU files into tree structures
 """
 # Initialize the ConlluReader
 reader = ConlluReader()
 train_trees = read_file(reader,path="en_partut-ud-train_clean.conllu", inference=False)
 dev_trees = read_file(reader,path="en_partut-ud-dev_clean.conllu", inference=False)
-test_trees = read_file(reader,pxth="en_partut-ud-test_clean.conllu", inference=True)
+test_trees = read_file(reader,path="en_partut-ud-test_clean.conllu", inference=True)
 
 """
 We remove the non-projective sentences from the training and development set,
