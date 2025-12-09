@@ -5,19 +5,19 @@
 
 ---
 
-## 1. Data Loading
+## 1. Data Loading - main.py
 - Read the CoNLL-U files using `conllu_reader.py`  
 - **Note:** Keep the exact token forms
 
 ---
 
-## 2. Filtering
+## 2. Filtering - main.py
 - Remove non-projective sentences  
 - **Optional:** Track how many sentences are eliminated for statistics
 
 ---
 
-## 3. Conversion to Objects
+## 3. Conversion to Objects - conllu_token.py
 - Parse CoNLL-U lines into `Token` / `Sentence` objects  
 - **Check:** IDs are from 1 to N and a Root exists in the State
 
@@ -34,7 +34,7 @@
 
 ---
 
-## 5. Example Generation (Oracle)
+## 5. Example Generation (Oracle) - algorithm.py
 - Implement Oracle using **Arc-Eager**  
 - Receives the gold tree  
 - Generates the transition sequence that reconstructs the tree  
@@ -45,8 +45,8 @@
 
 ---
 
-## 6. Feature Extraction
-- Use `state_to_feats()` to convert a `State` into feature IDs  
+## 6. Feature Extraction - algorithm.py
+- Use `state_to_feats()` to convert a `State` into feature IDs (list of features)
 - Example: top-2 stack + top-2 buffer = words and UPOS  
 - For each position, extract `word_id` and `upos_id` (PAD if nonexistent)  
 - **Example features:**  
@@ -56,7 +56,7 @@
 
 ---
 
-## 7. Vectorization
+## 7. Vectorization - model.py
 
 - Features: word embedding + POS embedding
 
@@ -64,7 +64,7 @@
 
 ---
 
-## 8. Model (Feed-Forward)
+## 8. Model (Feed-Forward) - model.py
 
 - Input layers for indices → embeddings → concatenation → Dense(hidden, ReLU)
 
@@ -76,7 +76,7 @@
 
 ---
 
-## 9. Training
+## 9. Training - model.py
 
 - Train on train.conllu, dev.conllu, test.conllu (cleaned)
 
@@ -180,6 +180,26 @@
 
 - LAS: Correct HEAD + DEPREL prediction (parent + relation)
 
+---
+
+## Sample 
+- state (State): current parsing state
+- transition (Transition): parser action to be taken in the given state
+
+---
+
+## State
+- S (list['Token'])
+- B (list['Token'])
+- A (set[tuple]): set of arcs of the form (head_id, dependency_label, dependent_id)
+
+---
+
+## Transition 
+- action (str): The action to take, represented as an string constant. Actions include SHIFT, REDUCE, LEFT-ARC, or RIGHT-ARC.
+- dependency (str): The type of dependency relationship (only for LEFT-ARC and RIGHT-ARC, otherwise it'll be None), corresponding to the deprel column
+
+---
 
 # Project Structure
 

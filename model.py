@@ -3,6 +3,13 @@ import tensorflow as tf
 from tensorflow.keras.layers import Input, Embedding, Flatten, Dense
 from tensorflow.keras.models import Model
 import numpy as np 
+from typing import List, Tuple, Dict, Any
+
+PAD = "<PAD>"
+UNK = "<UNK>"
+PAD_ID = 0
+UNK_ID = 1
+NONE_LABEL = "<NONE"
 
 
 class ParserMLP:
@@ -48,20 +55,25 @@ class ParserMLP:
             batch_size (int): The batch size used during model training.
         """
         self.word_emb_dim = word_emb_dim
+        self.pos_emb_dim = 25
         self.hidden_dim = hidden_dim
         self.epochs = epochs
         self.batch_size = batch_size
 
-        self.word2id = {}
-        self.id2word = {}
-        self.action2id = {}
-        self.id2action = {}
-        self.label2id = {}
-        self.id2label = {}
+        ## Create dictionaries for mapping strings to IDs
+        self.word2id: Dict[str, int] = {PAD: PAD_ID, UNK: UNK_ID}
+        self.id2word: Dict[int, str] = {PAD_ID: PAD, UNK_ID: UNK}
+        self.pos2id: Dict[str, int] = {PAD: PAD_ID, UNK: UNK_ID}
+        self.id2pos: Dict[int, str] = {PAD_ID: PAD, UNK_ID: UNK}
+        self.action2id: Dict[str, int] = {}
+        self.id2action: Dict[int, str] = {}
+        self.label2id: Dict[int, str] = {}
+        self.id2label: Dict[int, str] = {}
 
-        self.model = None
+        self.model: Model = None
+        self.vocab_size = None
+        self.pos_size = None
 
-    
     def train(self, training_samples: list['Sample'], dev_samples: list['Sample']):
         """
         Trains the MLP model using the provided training and development samples.
@@ -74,130 +86,285 @@ class ParserMLP:
             dev_samples (list[Sample]): A list of development samples used for model validation.
         """
 
-        # Construction of vocabulary
-        word2id = {}
-        id2word = {}
-        idx = 1
+        flat_train = []
 
+        ## Sample objects extraction
         for sample in training_samples:
-            for token in sample.tokens:
-                if token.word not in word2id:
-                    word2id[token.word] = idx
-                    id2word[idx] = token.word
-                    idx += 1
+            if hasattr(sample, "state") and hasattr(sample, "transition"):
+                flat_train.append(sample)
+            else:
+                try:
+                    for inner in sample:
+                        if hasattr(inner, "state") and hasattr(inner, "transition"):
+                            flat_train.append(inner)
+                except Exception:
+                    pass
+        
+        ## Validation of samples
+        if len(flat_train) == 0:
+            raise ValueError("No valid Sample instances found in training_samples")
+        
+        flat_dev = []
 
-        vocab_size = len(word2id) + 1
+        for sample in dev_samples:
+            if hasattr(sample, "state") and hasattr(sample, "transition"):
+                flat_dev.append(sample)
+            else:
+                try:
+                    for inner in sample:
+                        if hasattr(inner, "state") and hasattr(inner, "transition"):
+                            flat_dev.append(inner)
+                except Exception:
+                    pass
+        
+        ## Vocabularies for words, pos taggs, actions and labels
+        next_word_id = max(self.word2id.values()) + 1
+        next_pos_id = max(self.pos2id.values()) + 1
+        actions_set = set()
+        labels_set = set([NONE_LABEL])
 
-        # Construction of action2id and label2id
-        self.action2id = {}
-        self.id2action = {}
-        idx = 0
-        for sample in training_samples:
-            for action in sample.actions:
-                if action not in self.action2id:
-                    self.action2id[action] = idx
-                    self.id2action[idx] = action
-                    idx += 1
+        ## Extract words and POS taggs from stack and buffer
+        for sample in flat_train:
+            state = sample.state
+            S = getattr(state, "S")
+            B = getattr(state, "B")
 
-        self.label2id = {}
-        self.id2label= {}
-        idx = 0
-        for sample in training_samples:
-            for label in sample.labels:
-                if label not in self.label2id:
-                    self.label2id[label] = idx
-                    self.id2label[idx] = label
-                    idx += 1
+            ## Stack processing
+            ## LIFO method - takes the last element and the element before the lest one
+            for i in range(1,3):
 
-        self.word2id = word2id
-        self.id2word = id2word
+                if len(S) >= i:
+                    tok = S[-i] 
+                else:
+                    None
 
-        # Data transfirmation for training_samples
+                w = None
+                p = None
+                if tok is not None:
+                    w = getattr(tok, "form", None) or getattr(tok, "FORM", None) or getattr(tok, "word", None)
+                    p = getattr(tok, "upos", None) or getattr(tok, "UPOS", None) or getattr(tok, "pos", None)
+
+                if w is None:
+                    w = PAD
+                if p is None:
+                    p = PAD
+
+                ## Add word to vocabulary
+                if w not in self.word2id:
+                    self.word2id[w] = next_word_id
+                    self.id2word[next_word_id] = w
+                    next_word_id += 1
+                if p not in self.pos2id:
+                    self.pos2id[p] = next_pos_id
+                    self.id2pos[next_pos_id] = p
+                    next_pos_id += 1
+            
+            ## Buffer processing
+            ## FIFO method - takes the first and second elements
+            for i in range(0,2):
+                tok = B[i] if len(B) > i else None
+                w = None
+                p = None
+                if tok is not None:
+                    w = getattr(tok, "form", None) or getattr(tok, "FORM", None) or getattr(tok, "word", None)
+                    p = getattr(tok, "upos", None) or getattr(tok, "UPOS", None) or getattr(tok, "pos", None)
+                
+                if w is None:
+                    w = PAD
+                
+                if p is None:
+                    p = PAD
+                
+                if w not in self.word2id:
+                    self.word2id[w] = next_word_id
+                    self.id2word[next_word_id] = w
+                    next_word_id += 1
+                
+                if p not in self.pos2id:
+                    self.pos2id[p] = next_pos_id
+                    self.id2pos[next_pos_id] = p
+                    next_pos_id += 1
+
+            ## Save actions and labels from smaples
+            tr = sample.transition
+            if tr and getattr(tr, "action", None) is not None:
+                 action_name = tr.action 
+            
+            if tr and getattr(tr, "dependency", None) is not None:
+                label_name = tr.dependency
+
+            if action_name is not None:
+                actions_set.add(action_name)
+
+            if label_name is not None:
+                labels_set.add(label_name)
+
+        ## Calculate embedding dimension
+        self.vocab_size = max(self.id2word.keys()) + 1
+        self.pos_size = max(self.id2pos.keys()) + 1
+
+        self.action2id = {a: i for i, a in enumerate(sorted(actions_set))}
+        self.id2action = {i: a for a, i in self.action2id.items()}
+        self.label2id = {l: i for i, l in enumerate(sorted(labels_set))}
+        self.id2label = {i: l for l, i in self.label2id.items()}
+
+        ## Data transfirmation for training_samples
         X_train = []
         y_action = []
         y_label = []
 
-        for sample in training_samples:
-            for step in sample.steps:
-                stack = step.stack
-                buffer = step.buffer
+        ## Helper for extracting word ID
+        def get_word_id(tok):
+            if tok is None:
+                return PAD_ID
+            w = getattr(tok, "form", None) or getattr(tok, "FORM", None) or getattr(tok, "word", None)
+            if w is None:
+                return PAD_ID
+            
+            return self.word2id.get(w, UNK_ID)
+        
+        ## Helper for extracting POS ID
+        def get_pos_id(tok):
+            if tok is None:
+                return PAD_ID
+            p = getattr(tok, "upos", None) or getattr(tok, "UPOS", None) or getattr(tok, "pos", None)
+            if p is None:
+                return PAD_ID
+            
+            return self.pos2id.get(p, UNK_ID)
+    
+        for sample in flat_train:
+            state = sample.state
+            S = getattr(state, "S")
+            B = getattr(state, "B")
 
-                # Extracting first 2 elements or padding
-                s1 = self.word2id.get(stack[0].word, 0) if len(stack) > 0 else 0
-                s2 = self.word2id.get(stack[1].word, 0) if len(stack) > 1 else 0
-                b1 = self.word2id.get(buffer[0].word, 0) if len(buffer) > 0 else 0
-                b2 = self.word2id.get(buffer[1].word, 0) if len(buffer) > 1 else 0
+            ## Construction of input for Dense layer
+            s1 = get_word_id(S[-1]) if len(S) >= 1 else PAD_ID
+            s2 = get_word_id(S[-2]) if len(S) >= 2 else PAD_ID
+            b1 = get_word_id(B[0]) if len(B) >= 1 else PAD_ID
+            b2 = get_word_id(B[1]) if len(B) >= 2 else PAD_ID
+            ps1 = get_pos_id(S[-1]) if len(S) >= 1 else PAD_ID
+            ps2 = get_pos_id(S[-2]) if len(S) >= 2 else PAD_ID
+            pb1 = get_pos_id(B[0]) if len(B) >= 1 else PAD_ID
+            pb2 = get_pos_id(B[1]) if len(B) >= 2 else PAD_ID
 
-                x = [s1, s2, b1, b2]
+            X_train.append([s1, s2, b1, b2, ps1, ps2, pb1, pb2])
 
-                # One hot encoding for action and label
-                y_a = np.zeros(len(self.action2id))
-                y_a[self.action2id[step.action]] = 1
+            tr = sample.transition
 
-                y_l = np.zeros(len(self.label2id))
-                y_l[self.label2id[step.label]] = 1
+            if tr is None or getattr(tr, "action", None) is None:
+                raise ValueError("Training sample has no transition.action")
+            act_id = self.action2id[tr.action]
 
-                # Add to list
-                X_train.append(x)
-                y_action.append(y_a)
-                y_label.append(y_l)
+            if getattr(tr, "dependency", None) is not None:
+                lbl = tr.dependency 
+            else:
+                NONE_LABEL
 
-        # Data transformation for dev_samples
+            lbl_id = self.label2id.get(lbl, self.label2id[NONE_LABEL])
+
+            y_action.append(act_id)
+            y_label.append(lbl_id)
+
+        X_train = np.array(X_train, dtype='int32')
+        y_action = np.array(y_action, dtype='int32')
+        y_label = np.array(y_label, dtype='int32')
+
+        ## Data transformation for dev_samples
         X_dev = []
         y_dev_action = []
         y_dev_label = []
 
-        for sample in dev_samples:
-            for step in sample.steps:
-                stack = step.stack
-                buffer = step.buffer
+        for sample in flat_dev:
+            state = sample.state
+            S = getattr(state, "S")
+            B = getattr(state, "B")
 
-                s1 = self.word2id.get(stack[0].word, 0) if len(stack) > 0 else 0
-                s2 = self.word2id.get(stack[1].word, 0) if len(stack) > 1 else 0
-                b1 = self.word2id.get(buffer[0].word, 0) if len(buffer) > 0 else 0
-                b2 = self.word2id.get(buffer[1].word, 0) if len(buffer) > 1 else 0
-
-                x = [s1, s2, b1, b2]
-
-                y_a = np.zeros(len(self.action2id))
-                y_a[self.action2id[step.action]] = 1
-
-                y_l = np.zeros(len(self.label2id))
-                y_l[self.label2id[step.label]] = 1
-
-                X_dev.append(x)
-                y_dev_action.append(y_a)
-                y_dev_label.append(y_l)
-        
-        # Convert to numpy array
-        X_train = np.array(X_train)
-        y_action = np.array(y_action)
-        y_label = np.array(y_label)
-        X_dev = np.array(X_dev)
-        y_dev_action = np.array(y_dev_action)
-        y_dev_label = np.array(y_dev_label)
-
+            s1 = get_word_id(S[-1]) if len(S) >= 1 else PAD_ID
+            s2 = get_word_id(S[-2]) if len(S) >= 2 else PAD_ID
+            b1 = get_word_id(B[0]) if len(B) >= 1 else PAD_ID
+            b2 = get_word_id(B[1]) if len(B) >= 2 else PAD_ID
+            ps1 = get_pos_id(S[-1]) if len(S) >= 1 else PAD_ID
+            ps2 = get_pos_id(S[-2]) if len(S) >= 2 else PAD_ID
+            pb1 = get_pos_id(B[0]) if len(B) >= 1 else PAD_ID
+            pb2 = get_pos_id(B[1]) if len(B) >= 2 else PAD_ID
            
-        
-        input_ids = Input(shape=(4,), dtype='int32', name='input_ids')
+            X_dev.append([s1, s2, b1, b2, ps1, ps2, pb1, pb2])
 
-        embedding_layer = Embedding(input_dim=vocab_size, output_dim=self.word_emb_dim, input_length=4)
-        embedded = embedding_layer(input_ids)
-        flattened = Flatten()(embedded)
+            tr = sample.transition
+            if tr is None or getattr(tr, "action", None) is None:
+                continue
+            if tr.action not in self.action2id:
+                continue
+            act_id = self.action2id[tr.action]
+            lbl = tr.dependency if getattr(tr, "dependency", None) is not None else NONE_LABEL
+            if lbl not in self.label2id:
+                lbl = NONE_LABEL
+            lbl_id = self.label2id[lbl]
 
-        hidden = Dense(self.hidden_dim, activation='relu')(flattened)
+            y_dev_action.append(act_id)
+            y_dev_label.append(lbl_id)
 
+        X_dev = np.array(X_dev, dtype='int32') if X_dev else None
+        if y_dev_action:
+            y_dev_action = np.array(y_dev_action, dtype='int32')
+        else:
+            None
+        if y_dev_label:
+            y_dev_label = np.array(y_dev_label, dtype='int32') 
+        else:
+            None
+
+        ## Construction of Keras
+        input_ids = Input(shape=(8,), dtype='int32', name='input_ids')
+
+        ## Split words and POS taggs
+        words_slice = Lambda(lambda x: x[:, :4], output_shape=(4,))(input_ids)
+        pos_slice = Lambda(lambda x: x[:, 4:], output_shape=(4,))(input_ids)
+
+        ## Make embeddings
+        word_emb = Embedding(input_dim=self.vocab_size, output_dim=self.word_emb_dim, input_length=4, name='word_emb')
+        pos_emb = Embedding(input_dim=self.pos_size, output_dim=self.pos_emb_dim, input_length=4, name='pos_emb')
+
+        ## Concatenation of embedded words and POS taggs
+        w_embedded = Flatten()(word_emb(words_slice))
+        p_embedded = Flatten()(pos_emb(pos_slice))
+
+        concat = Concatenate()([w_embedded, p_embedded])
+
+        ## Initialize hidden layer
+        hidden = Dense(self.hidden_dim, activation='relu')(concat)
+
+        ## Initialize output
         action_output = Dense(len(self.action2id), activation='softmax', name='action_output')(hidden)
-        label_output = Dense(len(self.label2id), activation= 'softmax', name='label_output')(hidden)
+        label_output = Dense(len(self.label2id), activation='softmax', name='label_output')(hidden)
 
         self.model = Model(inputs=input_ids, outputs=[action_output, label_output])
-        self.model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
-        self.model.fit(X_train, [y_action, y_label], 
-                       batch_size=self.batch_size,
-                       epochs=self.epochs,
-                       validation_data=(X_dev, [y_dev_action, y_dev_label])
-                       )
+        ## Compile model
+        self.model.compile(optimizer='adam', 
+                           loss={
+                               'action_output': 'sparse_categorical_crossentropy',
+                               'label_output': 'sparse_categorical_crossentropy'
+                           }, 
+                           metrics={
+                               'action_output': 'sparse_categorical_accuracy',
+                               'label_output': 'sparse_categorical_accuracy'
+                           })
+        
+        if X_dev is not None:
+            val = (X_dev, {'action_output': y_dev_action, 'label_output': y_dev_label})
+        else:
+            val = None
+
+        ## Train model
+        self.model.fit(
+            X_train, 
+            {'action_output': y_action, 'label_output': y_label},
+            batch_size=self.batch_size,
+            epochs=self.epochs,
+            validation_data=val,
+            verbose=2)
         
 
     def evaluate(self, samples: list['Sample']):
@@ -210,7 +377,89 @@ class ParserMLP:
         Parameters:
             samples (list[Sample]): A list of samples to evaluate the model's performance.
         """
-        raise NotImplementedError
+        flat = []
+
+        ## Sample objects extraction
+        for s in samples:
+            if hasattr(s, "state") and hasattr(s, "transition"):
+                flat.append(s)
+            else:
+                try:
+                    for inner in s:
+                        if hasattr(inner, "state") and hasattr(inner, "transition"):
+                            flat.append(inner)
+                except Exception:
+                    pass
+        
+        if len(flat) == 0:
+            return 0.0, 0.0
+
+
+        ## Build X - for data evaluation 
+        X_eval = []
+        y_action_true = []
+        y_label_true = []
+
+        ## Helper functions
+        def get_word_id(tok):
+            if tok is None:
+                return PAD_ID
+            w = getattr(tok, "form", None) or getattr(tok, "FORM", None) or getattr(tok, "word", None)
+            if w is None:
+                return PAD_ID
+            return self.word2id.get(w, UNK_ID)
+
+        def get_pos_id(tok):
+            if tok is None:
+                return PAD_ID
+            p = getattr(tok, "upos", None) or getattr(tok, "UPOS", None) or getattr(tok, "pos", None)
+            if p is None:
+                return PAD_ID
+            return self.pos2id.get(p, UNK_ID)
+        
+        for sample in samples:
+            
+            state = sample.state
+            S = getattr(state, "S")
+            B = getattr(state, "B")
+
+            ## Create feature array
+            s1 = get_word_id(S[-1]) if len(S) >= 1 else PAD_ID
+            s2 = get_word_id(S[-2]) if len(S) >= 2 else PAD_ID
+            b1 = get_word_id(B[0]) if len(B) >= 1 else PAD_ID
+            b2 = get_word_id(B[1]) if len(B) >= 2 else PAD_ID
+            ps1 = get_pos_id(S[-1]) if len(S) >= 1 else PAD_ID
+            ps2 = get_pos_id(S[-2]) if len(S) >= 2 else PAD_ID
+            pb1 = get_pos_id(B[0]) if len(B) >= 1 else PAD_ID
+            pb2 = get_pos_id(B[1]) if len(B) >= 2 else PAD_ID
+
+            X_eval.append([s1, s2, b1, b2, ps1, ps2, pb1, pb2])
+
+            ## Construction of true labels
+            tr = sample.transition
+            y_action_true.append(self.action2id[tr.action])
+            
+            if getattr(tr, "dependency", None) is not None:
+                lbl = tr.dependency 
+            else:
+                NONE_LABEL
+
+            y_label_true.append(self.label2id.get(lbl, self.label2id[NONE_LABEL]))
+
+        X_eval = np.array(X_eval, dtype='int32')
+        y_action_true = np.array(y_action_true, dtype='int32')
+        y_label_true = np.array(y_label_true, dtype='int32')
+
+        ## Predict and evaluate
+        pred_action_probs, pred_label_probs = self.model.predict(X_eval, verbose=0)
+
+        pred_action = np.argmax(pred_action_probs, axis=1)
+        pred_label = np.argmax(pred_label_probs, axis=1)
+
+        action_accuracy = float(np.mean(pred_action == y_action_true))
+        label_accuracy = float(np.mean(pred_label == y_label_true))
+
+        return action_accuracy, label_accuracy
     
     def run(self, sents: list['Token']):
         """
@@ -236,9 +485,9 @@ class ParserMLP:
         # 8. Iterative Process: Repeat steps 2 to 7 until all sentences have reached their final state.
 
 
-        raise NotImplementedError
-
-
+## TODO: Debugging - Kriszta
+     
 if __name__ == "__main__":
     
     model = ParserMLP()
+    print("ParserMLP ready. Use train/evaluate/run from your pipeline.")
