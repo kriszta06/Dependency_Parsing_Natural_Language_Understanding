@@ -5,7 +5,7 @@ from tensorflow.keras.models import Model
 from state import State
 import numpy as np 
 from typing import List, Tuple, Dict, Any
-
+from algorithm import Sample
 np.random.seed(42)
 tf.random.set_seed(42)
 
@@ -89,9 +89,8 @@ class ParserMLP:
             training_samples (list[Sample]): A list of training samples for the parser.
             dev_samples (list[Sample]): A list of development samples used for model validation.
         """
-
         flat_train = []
-
+        print("s a lucrat")
         ## Sample objects extraction
         for sample in training_samples:
             if hasattr(sample, "state") and hasattr(sample, "transition"):
@@ -378,21 +377,13 @@ class ParserMLP:
             epochs=self.epochs,
             validation_data=val,
             verbose=2)
-        
 
     def evaluate(self, samples: list['Sample']):
-        """
-        Evaluates the model's performance on a set of samples.
 
-        This method is used to assess the accuracy of the model in predicting the correct
-        transition and dependency types. The expected accuracy range is between 75% and 85%.
 
-        Parameters:
-            samples (list[Sample]): A list of samples to evaluate the model's performance.
-        """
         flat = []
 
-        ## Sample objects extraction
+        # 1. Aplatizăm lista (pentru că oracle() întoarce listă de Sample per propoziție)
         for s in samples:
             if hasattr(s, "state") and hasattr(s, "transition"):
                 flat.append(s)
@@ -403,17 +394,15 @@ class ParserMLP:
                             flat.append(inner)
                 except Exception:
                     pass
-        
+
         if len(flat) == 0:
             return 0.0, 0.0
 
-
-        ## Build X - for data evaluation 
+        # 2. Construim X_eval și label-urile adevărate
         X_eval = []
         y_action_true = []
         y_label_true = []
 
-        ## Helper functions
         def get_word_id(tok):
             if tok is None:
                 return PAD_ID
@@ -429,14 +418,15 @@ class ParserMLP:
             if p is None:
                 return PAD_ID
             return self.pos2id.get(p, UNK_ID)
-        
-        for sample in samples:
-            
+
+        # ⚠️ AICI folosim flat, nu samples
+        for sample in flat:
+
             state = sample.state
             S = getattr(state, "S")
             B = getattr(state, "B")
 
-            ## Create feature array
+            # feature vector pentru eșantionul curent
             s1 = get_word_id(S[-1]) if len(S) >= 1 else PAD_ID
             s2 = get_word_id(S[-2]) if len(S) >= 2 else PAD_ID
             b1 = get_word_id(B[0]) if len(B) >= 1 else PAD_ID
@@ -446,28 +436,28 @@ class ParserMLP:
             pb1 = get_pos_id(B[0]) if len(B) >= 1 else PAD_ID
             pb2 = get_pos_id(B[1]) if len(B) >= 2 else PAD_ID
 
+            tr = sample.transition
+            if tr is None or getattr(tr, "action", None) is None:
+                continue  # dacă nu avem acțiune, nu evaluăm sample-ul
+
+            # adăugăm features DOAR dacă avem și labeluri
             X_eval.append([s1, s2, b1, b2, ps1, ps2, pb1, pb2])
 
-            ## Construction of true labels
-            tr = sample.transition
-
-            if tr is None or getattr(tr, "action", None) is None:
-                continue
-
             y_action_true.append(self.action2id[tr.action])
-            
-            lbl = tr.dependency if getattr(tr, "dependency", None) is not None else NONE_LABEL
 
+            lbl = tr.dependency if getattr(tr, "dependency", None) is not None else NONE_LABEL
             if lbl not in self.label2id:
                 lbl = NONE_LABEL
-
             y_label_true.append(self.label2id.get(lbl, self.label2id[NONE_LABEL]))
+
+        if len(X_eval) == 0:
+            return 0.0, 0.0
 
         X_eval = np.array(X_eval, dtype='int32')
         y_action_true = np.array(y_action_true, dtype='int32')
         y_label_true = np.array(y_label_true, dtype='int32')
 
-        ## Predict and evaluate
+        # 3. Predict & evaluate
         pred_action_probs, pred_label_probs = self.model.predict(X_eval, batch_size=64, verbose=0)
 
         pred_action = np.argmax(pred_action_probs, axis=1)
@@ -479,9 +469,7 @@ class ParserMLP:
         print(f"Evaluated {len(X_eval)} samples")
         print(f"Action accuracy: {action_accuracy}, Label accuracy: {label_accuracy}")
 
-
         return action_accuracy, label_accuracy
-    
 
     # Helper method to extract features from a state
     def extract_features(self, state):
@@ -530,30 +518,147 @@ class ParserMLP:
     def apply_transition(self, state, action, dep_label):
         S = state.S.copy()
         B = state.B.copy()
-        A = state.A.copy()  
+        A = state.A.copy()
 
-        if action == "SHIFT" and len(B) > 0:
+        # --- SHIFT ---
+        if action == "SHIFT":
+            if len(B) == 0:
+                return state  # invalid SHIFT → nu facem nimic
             S.append(B.pop(0))
-        elif action == "LEFT-ARC" and len(S) >= 2:
+            return State(s=S, b=B, a=A)
+
+        # --- LEFT-ARC ---
+        if action == "LEFT-ARC":
+            if len(S) < 2:
+                return state  # nu putem aplica
             head = S[-1]
-            dep = S[-2]
+            dep  = S[-2]
+
+            # blocăm cazuri invalide (ex: root ca dependent)
+            if dep.id <= 0 or head.id <= 0:
+                return state
+
             A.add((head.id, dep_label, dep.id))
             S.pop(-2)
-        elif action == "RIGHT-ARC" and len(S) >= 2:
+            return State(s=S, b=B, a=A)
+
+        # --- RIGHT-ARC ---
+        if action == "RIGHT-ARC":
+            if len(S) < 2:
+                return state
             head = S[-2]
-            dep = S[-1]
+            dep  = S[-1]
+
+            if dep.id <= 0 or head.id <= 0:
+                return state
+
             A.add((head.id, dep_label, dep.id))
             S.pop(-1)
+            return State(s=S, b=B, a=A)
 
-        return State(s=S, b=B, a=A)
-    
+        # --- REDUCE ---
+        if action == "REDUCE":
+            if len(S) == 0:
+                return state
+            # doar reducerea dacă tokenul are head deja atribuit
+            top = S[-1]
+            has_head = any(dep == top.id for (_, _, dep) in A)
+            if has_head:
+                S.pop()
+            return State(s=S, b=B, a=A)
+
+        return state
+
     def transition_from_index(self, idx):
         return self.id2action[idx]
     
     def is_final(self, state):
         return len(state.B) == 0 and len(state.S) == 1
     
-    def run(self, sents: list['Token']):
+    def predict_transitions(self, sentence):
+        
+        """
+        Predicts the full transition sequence for a given sentence.
+        Returns a list of (action, label) pairs.
+        """
+        from algorithm import State  # ensure State is imported
+
+        # Initialize state
+        state = State(s=[sentence[0]], b=sentence[1:], a=set())
+
+        transitions = []
+
+        while not self.is_final(state):
+
+            # Extract features for current state
+            feats = np.array([self.extract_features(state)], dtype="int32")
+
+            # Predict action + dependency
+            action_scores, dep_scores = self.model.predict(feats, verbose=0)
+
+            sorted_actions = action_scores[0].argsort()[::-1]
+
+            chosen_action = None
+            chosen_label = None
+
+            for a_idx in sorted_actions:
+                action = self.id2action[a_idx]
+                label_idx = np.argmax(dep_scores[0])
+                label = self.id2label[label_idx]
+
+                if self.is_valid_transition(state, action):
+                    chosen_action = action
+                    chosen_label = label
+                    break
+
+            if chosen_action is None:
+                break  # dead state, avoid infinite loop
+
+            transitions.append((chosen_action, chosen_label))
+
+            # Apply transition to update state
+            state = self.apply_transition(state, chosen_action, chosen_label)
+
+        return transitions
+    
+    def transitions_to_tree(self, sentence, transitions):
+        """
+        Applies a predicted transition sequence to reconstruct the dependency tree.
+        Returns the final State object (state.A conține arcele).
+        """
+
+        from algorithm import State
+        
+        # Start from initial parser state
+        state = State(s=[sentence[0]], b=sentence[1:], a=set())
+
+        for (action, label) in transitions:
+            if not self.is_valid_transition(state, action):
+                continue  # ignore illegal transitions
+            state = self.apply_transition(state, action, label)
+
+            if self.is_final(state):
+                break
+
+        return state
+
+    def run(self, sentences):
+        """
+        Runs parsing on a list of sentences using predicted transitions.
+        Returns final state (with arcs) for each sentence.
+        """
+        final_states = []
+
+        for sent in sentences:
+            transitions = self.predict_transitions(sent)
+            final_state = self.transitions_to_tree(sent, transitions)
+            final_states.append(final_state)
+
+        return final_states
+
+
+    
+ #   def run(self, sents: list['Token']):
         """
         Executes the model on a list of sentences to perform dependency parsing.
 
